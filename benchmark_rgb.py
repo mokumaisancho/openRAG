@@ -25,16 +25,13 @@ import argparse
 import json
 import os
 import sys
-import time
 import urllib.request
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from openrag.entropy import measure_entropy
-from openrag.classifier import classify_question
-from openrag.harness import EntropyHarness, HarnessResult
+from openrag.harness import EntropyHarness
 
 SCRIPT_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(SCRIPT_DIR, "benchmark_data", "rgb")
@@ -89,7 +86,6 @@ def run_noise_robustness(harness, samples, noise_ratio: float) -> dict:
         dict with accuracy, per-sample results
     """
     results = []
-    correct = 0
     gate_passed = 0
     total = 0
 
@@ -98,7 +94,6 @@ def run_noise_robustness(harness, samples, noise_ratio: float) -> dict:
 
     for sample in samples:
         query = sample["query"]
-        answers = sample["answer"]  # list of lists of acceptable variants
 
         # Build context: mix positive and negative passages
         positives = sample.get("positive", [])[:n_positive]
@@ -188,7 +183,6 @@ def run_negative_rejection(harness, samples) -> dict:
 def run_information_integration(harness, samples, noise_ratio: float) -> dict:
     """Test information integration: combine facts from multiple docs."""
     results = []
-    correct = 0
     gate_passed = 0
     total = 0
 
@@ -244,12 +238,10 @@ def run_counterfactual(harness, samples) -> dict:
     should detect that something is off and flag it.
     """
     results = []
-    detected = 0
     total = 0
 
     for sample in samples:
         query = sample["query"]
-        fake_answer = sample.get("fakeanswer", "")
         wrong_docs = sample.get("positive_wrong", [])
 
         if not wrong_docs:
@@ -268,7 +260,7 @@ def run_counterfactual(harness, samples) -> dict:
         results.append({
             "id": sample["id"],
             "query": query,
-            "fake_answer": fake_answer,
+            "fake_answer": sample.get("fakeanswer", ""),
             "verdict": result.final_verdict,
             "delta": delta,
             "bare_h": result.checkpoints[0].h_top100,
@@ -358,7 +350,7 @@ def main():
     print("RGB BENCHMARK SUMMARY")
     print(f"{'=' * 60}")
 
-    print(f"\n  Noise Robustness (gate pass rate):")
+    print("\n  Noise Robustness (gate pass rate):")
     print(f"    {'Noise':>8} {'Our Gate':>12} {'ChatGPT':>12} {'Target':>12}")
     chatgpt_noise = {0.0: 96.3, 0.2: 94.0, 0.4: 92.0, 0.6: 88.3}
     for ratio in NOISE_RATIOS:
@@ -367,13 +359,13 @@ def main():
         theirs = chatgpt_noise.get(ratio, 0)
         print(f"    {ratio:>8.1f} {ours:>11.1f}% {theirs:>11.1f}% {'>90':>12}")
 
-    print(f"\n  Negative Rejection:")
+    print("\n  Negative Rejection:")
     print(f"    Our rejection rate:  {neg_result['rejection_rate']:.1%}")
-    print(f"    ChatGPT best (Rej*): 45.0%")
-    print(f"    Target:              >60%")
+    print("    ChatGPT best (Rej*): 45.0%")
+    print("    Target:              >60%")
 
     if int_results:
-        print(f"\n  Information Integration:")
+        print("\n  Information Integration:")
         for ratio, r in int_results.items():
             print(f"    Noise={ratio}: gate_pass={r['gate_pass_rate']:.1%}  (ChatGPT: 55%)")
 

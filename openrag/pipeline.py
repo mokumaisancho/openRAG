@@ -1,6 +1,6 @@
 """openRAG pipeline — retrieval + entropy quality gate + generation."""
 from .gate import EntropyGate
-from .retriever import TFIDFRetriever, Document
+from .retriever import TFIDFRetriever
 from .entropy import SignalResult
 
 

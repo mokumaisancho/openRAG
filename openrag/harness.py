@@ -8,13 +8,9 @@ Measures entropy at three points:
 Dynamically adjusts delta threshold based on question type
 (extraction: Δ > 0.4, synthesis: Δ > 0.15).
 """
-import gc
-import json
-import os
 import time
 from dataclasses import dataclass, field
 
-import numpy as np
 from llama_cpp import Llama
 
 from .entropy import measure_entropy
@@ -112,7 +108,7 @@ class EntropyHarness:
         Returns:
             HarnessResult with all checkpoints and final verdict
         """
-        start = time.time()
+        start = time.monotonic()
 
         # Classify question → set dynamic threshold
         qinfo = classify_question(question)
@@ -136,14 +132,14 @@ class EntropyHarness:
             bare.context_used = "bare"
             result.final_verdict = "answer"
             result.answer_context = ""
-            result.elapsed_ms = (time.time() - start) * 1000
+            result.elapsed_ms = (time.monotonic() - start) * 1000
             return result
 
         # === CHECKPOINT 2: First retrieval ===
         contexts = retrieve_fn(question, top_k)
         if not contexts:
             result.final_verdict = "abstain"
-            result.elapsed_ms = (time.time() - start) * 1000
+            result.elapsed_ms = (time.monotonic() - start) * 1000
             return result
 
         combined_ctx = "\n\n".join(contexts)
@@ -157,7 +153,7 @@ class EntropyHarness:
         if cp2.passed:
             result.final_verdict = "answer"
             result.answer_context = combined_ctx
-            result.elapsed_ms = (time.time() - start) * 1000
+            result.elapsed_ms = (time.monotonic() - start) * 1000
             return result
 
         # === CHECKPOINT 3+: Iterative retrieval ===
@@ -180,7 +176,7 @@ class EntropyHarness:
             if cp.passed:
                 result.final_verdict = "answer"
                 result.answer_context = expanded
-                result.elapsed_ms = (time.time() - start) * 1000
+                result.elapsed_ms = (time.monotonic() - start) * 1000
                 return result
 
         # Optional: control checkpoint (irrelevant context discrimination)
@@ -195,7 +191,7 @@ class EntropyHarness:
             result.checkpoints.append(cp_ctrl)
 
         result.final_verdict = "abstain"
-        result.elapsed_ms = (time.time() - start) * 1000
+        result.elapsed_ms = (time.monotonic() - start) * 1000
         return result
 
     def evaluate_batch(
@@ -218,7 +214,6 @@ class EntropyHarness:
         lines.append(f"\n  {'Q#':>3} {'Type':<12} {'Thresh':>6} {'Iters':>5} {'Verdict':<14} {'Bare':>7} {'Delta':>7}")
         lines.append(f"  {'-' * 60}")
 
-        correct = 0
         total = len(results)
         extraction_results = [r for r in results if r.question_type == "extraction"]
         synthesis_results = [r for r in results if r.question_type == "synthesis"]

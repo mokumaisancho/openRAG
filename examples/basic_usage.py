@@ -13,7 +13,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from openrag import EntropyGate, TFIDFRetriever, OpenRAGPipeline
+from openrag import EntropyGate, OpenRAGPipeline
 
 
 def demo_gate(model_path: str):
@@ -29,12 +29,12 @@ def demo_gate(model_path: str):
     irrelevant = "The Pacific Ocean is the largest and deepest ocean on Earth, covering more than 30% of the planet's surface."
 
     print(f"\nQuestion: {question}")
-    print(f"\n--- Relevant context ---")
+    print("\n--- Relevant context ---")
     r1 = gate.check(question, relevant, irrelevant)
     print(f"  Passed: {r1.passed}  Confidence: {r1.confidence}")
     print(f"  H_bare: {r1.h_bare:.4f}  H_with_ctx: {r1.h_with_context:.4f}  Delta: {r1.delta:+.4f}")
 
-    print(f"\n--- Irrelevant context (control) ---")
+    print("\n--- Irrelevant context (control) ---")
     r2 = gate.check(question, irrelevant, relevant)
     print(f"  Passed: {r2.passed}  Confidence: {r2.confidence}")
     print(f"  H_bare: {r2.h_bare:.4f}  H_with_ctx: {r2.h_with_context:.4f}  Delta: {r2.delta:+.4f}")
@@ -63,7 +63,7 @@ def demo_pipeline(model_path: str, docs: list[str]):
         if result.answer:
             print(f"  A: {result.answer[:200]}...")
         else:
-            print(f"  A: [gate rejected — no confident answer]")
+            print("  A: [gate rejected — no confident answer]")
 
 
 if __name__ == "__main__":
