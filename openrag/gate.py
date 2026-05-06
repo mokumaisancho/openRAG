@@ -38,7 +38,7 @@ class EntropyGate:
             n_threads=n_threads,
             verbose=False,
             embedding=True,
-            logits_all=True,
+            logits_all=False,
         )
 
     def check(

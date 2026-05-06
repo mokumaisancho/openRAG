@@ -72,7 +72,7 @@ class EntropyHarness:
             n_threads=n_threads,
             verbose=False,
             embedding=True,
-            logits_all=True,
+            logits_all=False,
         )
 
     def _checkpoint(self, text: str, name: str, bare_h: float, threshold: float) -> CheckpointResult:
@@ -96,6 +96,7 @@ class EntropyHarness:
         retrieve_fn,
         top_k: int = 3,
         control_context: str | None = None,
+        bare_checkpoint: CheckpointResult | None = None,
     ) -> HarnessResult:
         """Run full multi-checkpoint evaluation.
 
@@ -104,6 +105,7 @@ class EntropyHarness:
             retrieve_fn: callable(question, top_k) -> list[str] of retrieved contexts
             top_k: initial retrieval count
             control_context: irrelevant context for discrimination test
+            bare_checkpoint: pre-computed bare entropy (avoids redundant LLM eval)
 
         Returns:
             HarnessResult with all checkpoints and final verdict
@@ -111,20 +113,23 @@ class EntropyHarness:
         start = time.monotonic()
 
         # Classify question → set dynamic threshold
-        qinfo = classify_question(question)
-        threshold = qinfo["threshold"]
+        q_type, q_conf, threshold = classify_question(question)
 
         result = HarnessResult(
             question=question,
-            question_type=qinfo["type"],
+            question_type=q_type,
             dynamic_threshold=threshold,
         )
 
-        # === CHECKPOINT 1: Bare question ===
-        bare = self._checkpoint(question, "pre_retrieval", 0.0, 0.0)
-        bare_h = bare.h_top100
-        bare.delta_from_bare = 0.0
-        bare.passed = True
+        # === CHECKPOINT 1: Bare question (use cache if available) ===
+        if bare_checkpoint is not None:
+            bare = bare_checkpoint
+            bare_h = bare.h_top100
+        else:
+            bare = self._checkpoint(question, "pre_retrieval", 0.0, 0.0)
+            bare_h = bare.h_top100
+            bare.delta_from_bare = 0.0
+            bare.passed = True
         result.checkpoints.append(bare)
 
         # Does the model already know? (low entropy = confident)

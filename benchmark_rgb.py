@@ -31,15 +31,16 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from openrag.harness import EntropyHarness
+from openrag.entropy import measure_entropy
+from openrag.harness import EntropyHarness, CheckpointResult
 
 SCRIPT_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(SCRIPT_DIR, "benchmark_data", "rgb")
 
 RGB_URLS = {
-    "en": "https://raw.githubusercontent.com/chen700564/RGB/main/benchmark/en.json",
-    "en_int": "https://raw.githubusercontent.com/chen700564/RGB/main/benchmark/en_int.json",
-    "en_fact": "https://raw.githubusercontent.com/chen700564/RGB/main/benchmark/en_fact.json",
+    "en": "https://raw.githubusercontent.com/chen700564/RGB/master/data/en.json",
+    "en_int": "https://raw.githubusercontent.com/chen700564/RGB/master/data/en_int.json",
+    "en_fact": "https://raw.githubusercontent.com/chen700564/RGB/master/data/en_fact.json",
 }
 
 # Number of positive/negative passages per question (RGB default: 5)
@@ -60,21 +61,46 @@ def download_rgb():
 
 
 def load_rgb():
-    """Load RGB benchmark data."""
+    """Load RGB benchmark data (JSONL format)."""
     data = {}
     for name in RGB_URLS:
         path = os.path.join(DATA_DIR, f"{name}.json")
         if not os.path.exists(path):
             return None
         with open(path) as f:
-            data[name] = json.load(f)
+            data[name] = [json.loads(line) for line in f if line.strip()]
     return data
 
 
 # ─── Evaluation Functions ──────────────────────────────────────────
 
 
-def run_noise_robustness(harness, samples, noise_ratio: float) -> dict:
+def precompute_bare_entropy(harness, samples) -> dict:
+    """Cache bare-question entropy once per unique query.
+
+    Avoids redundant LLM evals across noise ratios and test types.
+    """
+    cache = {}
+    for sample in samples:
+        query = sample["query"]
+        if query not in cache:
+            m = measure_entropy(harness._llm, query)
+            cp = CheckpointResult(
+                name="pre_retrieval",
+                h_top100=m["h_top100"],
+                h_full=m["h_full"],
+                top100_mass=m["top100_mass"],
+                top5_tokens=[(t, round(p, 3)) for t, p in m["top5_tokens"]],
+                n_tokens=m["n_tokens_input"],
+                delta_from_bare=0.0,
+                passed=True,
+                context_used="bare",
+            )
+            cache[query] = cp
+    return cache
+
+
+def run_noise_robustness(harness, samples, noise_ratio: float, bare_cache: dict) -> dict:
     """Test noise robustness: answer correctly with noisy documents mixed in.
 
     Args:
@@ -110,7 +136,7 @@ def run_noise_robustness(harness, samples, noise_ratio: float) -> dict:
         def retrieve_fn(q, k):
             return [context]
 
-        result = harness.evaluate(query, retrieve_fn, top_k=1)
+        result = harness.evaluate(query, retrieve_fn, top_k=1, bare_checkpoint=bare_cache.get(query))
         results.append({
             "id": sample["id"],
             "query": query,
@@ -135,7 +161,7 @@ def run_noise_robustness(harness, samples, noise_ratio: float) -> dict:
     }
 
 
-def run_negative_rejection(harness, samples) -> dict:
+def run_negative_rejection(harness, samples, bare_cache: dict) -> dict:
     """Test negative rejection: refuse to answer when only irrelevant docs exist.
 
     Uses only negative passages (no positives). The entropy gate should
@@ -157,10 +183,9 @@ def run_negative_rejection(harness, samples) -> dict:
         def retrieve_fn(q, k):
             return [context]
 
-        result = harness.evaluate(query, retrieve_fn, top_k=1)
+        result = harness.evaluate(query, retrieve_fn, top_k=1, bare_checkpoint=bare_cache.get(query))
 
         total += 1
-        # "abstain" = gate correctly rejected the irrelevant context
         if result.final_verdict == "abstain":
             rejected += 1
 
@@ -300,10 +325,15 @@ def main():
     print(f"{'=' * 60}")
     en_samples = data["en"][:n]
 
+    # Pre-compute bare entropy once (saves 150+ redundant LLM evals)
+    print(f"  Pre-computing bare entropy for {len(en_samples)} questions...", flush=True)
+    bare_cache = precompute_bare_entropy(harness, en_samples)
+    print("  Done.")
+
     noise_results = {}
     for ratio in NOISE_RATIOS:
         print(f"  Noise={ratio:.1f} ...", end=" ", flush=True)
-        r = run_noise_robustness(harness, en_samples, ratio)
+        r = run_noise_robustness(harness, en_samples, ratio, bare_cache)
         noise_results[str(ratio)] = r
         print(f"gate_pass={r['gate_pass_rate']:.1%}")
 
@@ -314,7 +344,7 @@ def main():
     print("TEST 2: Negative Rejection")
     print(f"{'=' * 60}")
     print(f"  Running {n} samples...", end=" ", flush=True)
-    neg_result = run_negative_rejection(harness, en_samples)
+    neg_result = run_negative_rejection(harness, en_samples, bare_cache)
     all_results["negative_rejection"] = neg_result
     print(f"rejection_rate={neg_result['rejection_rate']:.1%}")
 

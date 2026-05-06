@@ -26,7 +26,7 @@ def measure_entropy(llm, text: str) -> dict:
     """Measure entropy from full vocabulary logits at last token position.
 
     Args:
-        llm: llama_cpp.Llama instance (must be loaded with logits_all=True)
+        llm: llama_cpp.Llama instance
         text: input text to evaluate
 
     Returns:
@@ -35,26 +35,32 @@ def measure_entropy(llm, text: str) -> dict:
     llm.reset()
     tokens = llm.tokenize(text.encode())
     llm.eval(tokens)
-    logits = llm._scores[-1].copy()
+    scores = llm._scores[-1]
+    logits = np.array(scores, dtype=np.float32)
 
-    logits_max = np.max(logits)
-    exp_logits = np.exp(logits - logits_max)
-    probs = exp_logits / np.sum(exp_logits)
+    # In-place softmax to reduce allocations
+    np.subtract(logits, np.max(logits), out=logits)
+    np.exp(logits, out=logits)
+    total = np.sum(logits)
+    probs = logits / total
 
     log_probs = np.log(probs + 1e-10)
     h_full = float(-np.sum(probs * log_probs))
 
+    # Top-100 entropy
     top_k = 100
-    top_indices = np.argpartition(logits, -top_k)[-top_k:]
-    top_indices = top_indices[np.argsort(logits[top_indices])[::-1]]
+    top_indices = np.argpartition(probs, -top_k)[-top_k:]
+    top_indices = top_indices[np.argsort(probs[top_indices])[::-1]]
     top_probs = probs[top_indices]
     top100_mass = float(np.sum(top_probs))
     top_probs_norm = top_probs / top100_mass
-    h_top100 = float(-np.sum(top_probs_norm * np.log(top_probs_norm + 1e-10)))
+    # Reuse log_probs instead of recomputing log
+    h_top100 = float(-np.sum(top_probs_norm * (log_probs[top_indices] - np.log(top100_mass))))
 
-    top5_indices = np.argsort(logits)[-5:][::-1]
-    top5_tokens = [llm.detokenize([int(i)]).decode(errors="replace") for i in top5_indices]
-    top5_probs = [float(probs[i]) for i in top5_indices]
+    # Top-5 derived from top-100 (already sorted descending)
+    top5_indices = top_indices[:5]
+    top5_tokens = [llm.detokenize([int(i)]).decode(errors="replace").strip() for i in top5_indices]
+    top5_probs = [round(float(probs[i]), 3) for i in top5_indices]
 
     return {
         "h_full": h_full,
